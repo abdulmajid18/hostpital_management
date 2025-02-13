@@ -9,9 +9,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from .models import get_object_or_none
+from .models import get_object_or_none, PatientDoctorAssignment
 from .serializers import UserSerializer, MyTokenObtainPairSerializer, TokenResponseSerializer, RefreshTokenSerializer, \
-    ResendAccountActivationEmailSerializer, UserDetailsSerializer
+    ResendAccountActivationEmailSerializer, UserDetailsSerializer, PatientDoctorAssignmentSerializer, DoctorSerializer
 from .utils.email import send_activation_email
 
 from drf_yasg import openapi
@@ -305,6 +305,162 @@ def user_details(request):
     user = request.user
     serializer = UserDetailsSerializer(user)
     return Response(serializer.data)
+
+
+@swagger_auto_schema(
+    method="post",
+    request_body=PatientDoctorAssignmentSerializer,
+    responses={
+        201: PatientDoctorAssignmentSerializer,
+        400: "Bad Request - Invalid data",
+        403: "Forbidden - Only patients can assign a doctor",
+    },
+    security=[{"Bearer": []}],
+    operation_id="Assign Doctor",
+    tags=["Doctor-Patient Assignment"],
+    operation_description="""
+    Allows a patient to assign themselves to a doctor.
+
+    **Required Headers:**
+    - Authorization: Bearer <JWT_TOKEN>
+
+    **Request Body:**
+    - `doctor`: The ID of the doctor being assigned.
+
+    **Responses:**
+    - `201 Created`: Assignment successful.
+    - `400 Bad Request`: Invalid input.
+    - `403 Forbidden`: Only patients can assign a doctor.
+    """,
+)
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def assign_doctor(request):
+    if request.user.get_role() != "Patient":
+        return Response({"error": "Only patients can assign a doctor."}, status=status.HTTP_403_FORBIDDEN)
+
+    serializer = PatientDoctorAssignmentSerializer(data=request.data, context={"request": request})
+    if serializer.is_valid():
+        serializer.save(patient=request.user)  # Automatically assign the logged-in patient
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
+    method="get",
+    responses={
+        200: openapi.Response(
+            description="List of assigned patients",
+            examples={
+                "application/json": [
+                    {"patient_id": "1234", "patient_name": "John Doe", "assigned_at": "2025-02-13T12:00:00Z"}
+                ]
+            },
+        ),
+        403: "Forbidden - Only doctors can view their patients",
+        200: "No patients assigned",
+    },
+    security=[{"Bearer": []}],
+    operation_id="Get Doctor's Patients",
+    tags=["Doctor-Patient Assignment"],
+    operation_description="""
+    Allows a doctor to view all their assigned patients.
+
+    **Required Headers:**
+    - Authorization: Bearer <JWT_TOKEN>
+
+    **Responses:**
+    - `200 OK`: List of patients.
+    - `403 Forbidden`: Only doctors can access this.
+    - `200 OK`: If the doctor has no assigned patients.
+    """,
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_doctor_patients(request):
+    if request.user.get_role() != "Doctor":
+        return Response({"error": "Only doctors can view their patients."}, status=status.HTTP_403_FORBIDDEN)
+
+    patients = PatientDoctorAssignment.objects.filter(doctor=request.user)
+    if not patients.exists():
+        return Response({"message": "No patients assigned to you."}, status=status.HTTP_200_OK)
+
+    patient_data = [
+        {
+            "patient_id": assignment.patient.id,
+            "patient_name": assignment.patient.name,
+            "assigned_at": assignment.created_at,
+        }
+        for assignment in patients
+    ]
+    return Response(patient_data, status=status.HTTP_200_OK)
+
+
+@swagger_auto_schema(
+    method="get",
+    responses={200: DoctorSerializer(many=True)},
+    security=[{"Bearer": []}],
+    operation_id="Get All Doctors",
+    tags=["Doctors"],
+    operation_description="""
+    Retrieves a list of all doctors in the system.
+
+    **Required Headers:**
+    - Authorization: Bearer <JWT_TOKEN>
+
+    **Responses:**
+    - `200 OK`: List of doctors.
+    - `200 OK`: If no doctors exist.
+    """,
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_doctors(request):
+    doctors = User.objects.filter(groups__name="Doctor")
+
+    if not doctors.exists():
+        return Response({"message": "No doctors available."}, status=status.HTTP_200_OK)
+
+    doctor_data = DoctorSerializer(doctors, many=True).data  # Use the serializer
+    return Response(doctor_data, status=status.HTTP_200_OK)
+
+
+@swagger_auto_schema(
+    method="get",
+    responses={
+        200: DoctorSerializer(),
+        403: "Forbidden - Only patients can view their assigned doctor",
+        404: "Not Found - No doctor assigned",
+    },
+    security=[{"Bearer": []}],
+    operation_id="Get Assigned Doctor",
+    tags=["Doctor-Patient Assignment"],
+    operation_description="""
+    Retrieves the doctor assigned to the currently authenticated patient.
+
+    **Required Headers:**
+    - Authorization: Bearer <JWT_TOKEN>
+
+    **Responses:**
+    - `200 OK`: Assigned doctor details.
+    - `403 Forbidden`: Only patients can access this.
+    - `404 Not Found`: No assigned doctor.
+    """,
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_assigned_doctor(request):
+    if request.user.get_role() != "Patient":
+        return Response({"error": "Only patients can view their assigned doctor."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        assignment = PatientDoctorAssignment.objects.get(patient=request.user)
+        doctor = assignment.doctor
+        doctor_data = DoctorSerializer(doctor).data
+        return Response(doctor_data, status=status.HTTP_200_OK)
+    except PatientDoctorAssignment.DoesNotExist:
+        return Response({"message": "No doctor assigned yet."}, status=status.HTTP_404_NOT_FOUND)
 
 
 register = RegisterView.as_view()

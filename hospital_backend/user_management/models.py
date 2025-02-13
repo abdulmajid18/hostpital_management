@@ -4,6 +4,7 @@ from enum import Enum
 from django.conf import settings
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser, Group
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -102,8 +103,41 @@ class User(AbstractUser):
             return True
         return False
 
-    def get_full_name(self):
-        return f"{self.first_name} {self.last_name}".strip()
+
+from django.core.exceptions import ValidationError
+
+
+class PatientDoctorAssignment(models.Model):
+    patient = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='assigned_doctor',
+        limit_choices_to={'groups__name': 'Patient'}  # Restrict choices based on groups
+    )
+    doctor = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='assigned_patients',
+        limit_choices_to={'groups__name': 'Doctor'}  # Restrict choices based on groups
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.patient.name} -> {self.doctor.name}"
+
+    def clean(self):
+        """Ensure the patient and doctor belong to the correct groups"""
+        if self.patient.get_role() != "Patient":
+            raise ValidationError("The selected user must be a patient.")
+        if self.doctor.get_role() != "Doctor":
+            raise ValidationError("The selected user must be a doctor.")
+
+        if PatientDoctorAssignment.objects.filter(patient=self.patient).exists():
+            raise ValidationError("This patient is already assigned to a doctor.")
+
+    def save(self, *args, **kwargs):
+        self.clean()  # Run validation before saving
+        super().save(*args, **kwargs)
 
 
 class UserInvitationToken(models.Model):

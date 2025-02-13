@@ -10,6 +10,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import UserRole
 from .utils.custom_exception import CustomException
+from .models import PatientDoctorAssignment
 
 User = get_user_model()
 
@@ -129,3 +130,36 @@ class UserDetailsSerializer(ModelSerializer):
         """Retrieve the first group name assigned to the user as the role"""
         group = obj.groups.first()
         return group.name if group else None
+
+
+class PatientDoctorAssignmentSerializer(ModelSerializer):
+    class Meta:
+        model = PatientDoctorAssignment
+        fields = ["patient", "doctor", "created_at"]
+        read_only_fields = ["created_at", "patient"]
+
+    def validate(self, data):
+        patient = self.context["request"].user
+
+        if patient.get_role() != UserRole.PATIENT:
+            raise ValidationError("Only patients can assign a doctor.")
+        if data["doctor"].get_role() != UserRole.DOCTOR:
+            raise ValidationError("Selected user is not a doctor.")
+        if PatientDoctorAssignment.objects.filter(patient=patient).exists():
+            raise ValidationError("You are already assigned to a doctor.")
+
+        return data
+
+    def create(self, validated_data):
+        patient = self.context["request"].user
+        doctor = validated_data["doctor"]
+        # Remove existing assignment if present
+        PatientDoctorAssignment.objects.filter(patient=patient).delete()
+        # Assign the new doctor
+        return PatientDoctorAssignment.objects.create(patient=patient, doctor=doctor)
+
+
+class DoctorSerializer(ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "name", "email"]
