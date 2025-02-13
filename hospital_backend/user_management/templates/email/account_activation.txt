@@ -1,0 +1,10 @@
+Hi {{ user.first_name }},
+
+Please click the link below to activate your account:
+
+{{ activation_link }}
+
+If you did not request this activation, please ignore this email.
+
+Thank you,
+Hospital Management Team
