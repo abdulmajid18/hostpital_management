@@ -43,7 +43,6 @@ def build_confirmation_link(request, user):
     """
     uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
     token = default_token_generator.make_token(user)
-    print("^^^^^^^^^^^^^", token)
 
     path = reverse(
         "user_management:confirm_account", kwargs={"uid": uidb64, "token": token}
