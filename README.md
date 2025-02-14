@@ -102,6 +102,15 @@ This backend system is designed to handle the complex requirements of a hospital
 3. Configure environment variables (e.g., JWT secret, database credentials).
 4. Run the application using your preferred backend stack (Node.js recommended).
 
+
+### Additional Notes:
+- **`setup_roles`**: Make sure this management command is implemented to create initial roles (e.g., Admin).
+- **RabbitMQ Consumer**: This will run in the background and listen for messages.
+- **Gunicorn**: The server will be configured with a set number of workers, threads, and timeout settings for optimal performance.
+
+Let me know if you'd like to modify or add more steps to the script!
+
+
 ## Contribution
 
 Contributions are welcome! Please fork the repository and submit a pull request with your changes.
