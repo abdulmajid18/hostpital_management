@@ -28,8 +28,8 @@ class RabbitMQManager:
         """Initialize RabbitMQ connection settings."""
         self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
         self.rabbitmq_queues = {
-            "notes": os.getenv("NOTES_QUEUE", "notes_queue"),
-            "actions": os.getenv("ACTIONS_QUEUE", "actions_queue")
+            "notes": os.getenv("NOTES_QUEUE", "notes"),
+            "actions": os.getenv("ACTIONS_QUEUE", "actions")
         }
         self.connection = None
         self.channel = None
@@ -81,7 +81,6 @@ class RabbitMQManager:
             :param message:
             :param queue_key:
         """
-
         queue_name = self.rabbitmq_queues.get(queue_key)
         if not queue_name:
             raise ValueError(f"Queue key '{queue_key}' is not defined!")
@@ -101,46 +100,3 @@ class RabbitMQManager:
             except AMQPError as e:
                 logger.error(f"Failed to publish message: {e}")
                 raise
-
-    def publish_processed_action(self, queue_key: str, message: Dict) -> None:
-        """
-        Publish a message to RabbitMQ with retry logic.
-
-        Args:
-            message: Dictionary containing message data
-            :param message:
-            :param queue_key:
-        """
-        queue_name = self.rabbitmq_queues.get(queue_key)
-        if not queue_name:
-            raise ValueError(f"Queue key '{queue_key}' is not defined!")
-
-        with self.ensure_connection():
-            try:
-                self.channel.basic_publish(
-                    exchange="",
-                    routing_key=queue_name,
-                    body=json.dumps(message).encode("utf-8"),
-                    properties=pika.BasicProperties(
-                        delivery_mode=pika.DeliveryMode.Persistent,
-                        content_type='application/json'
-                    )
-                )
-                logger.info(f"Published message to {queue_name}: {message}")
-            except AMQPError as e:
-                logger.error(f"Failed to publish message: {e}")
-                raise
-
-    def close_connection(self) -> None:
-        """Safely close the RabbitMQ connection."""
-        try:
-            if self.connection and not self.connection.is_closed:
-                self.connection.close()
-                logger.info("RabbitMQ connection closed")
-        except AMQPError as e:
-            logger.error(f"Failed to close RabbitMQ connection: {e}")
-            raise
-
-    def __del__(self) -> None:
-        """Ensure connection is closed when object is destroyed."""
-        self.close_connection()

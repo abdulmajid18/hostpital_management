@@ -23,24 +23,49 @@ class StateScheduler:
         # If never completed or completed on a different day
         if not last_completion or last_completion.date() < now.date():
             if schedule['type'] == 'fixed_time':
+                # Set specific_times to an empty list if missing
+                specific_times = schedule.get('specific_times', [])
+                if not specific_times:
+                    return None  # No specific times provided, so no next occurrence
+
+                # Validate specific_times format
+                if not isinstance(specific_times, list):
+                    raise ValueError("specific_times must be a list")
+                if not all(isinstance(time_str, str) for time_str in specific_times):
+                    raise ValueError("specific_times must be a list of strings")
+
                 # Find next available time today
-                for time_str in schedule['specific_times']:
-                    hour, minute = map(int, time_str.split(':'))
-                    next_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                    print(f"************ {next_time}")
-                    if next_time > now:
-                        return next_time
+                for time_str in specific_times:
+                    try:
+                        hour, minute = map(int, time_str.split(':'))
+                        next_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                        if next_time > now:
+                            return next_time
+                    except (ValueError, IndexError):
+                        raise ValueError(f"Invalid time format in specific_times: {time_str}. Expected 'HH:MM'.")
+
                 # If no times left today, use first time tomorrow
-                tomorrow = now + timedelta(days=1)
-                hour, minute = map(int, schedule['specific_times'][0].split(':'))
-                return tomorrow.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                try:
+                    hour, minute = map(int, specific_times[0].split(':'))
+                    tomorrow = now + timedelta(days=1)
+                    return tomorrow.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                except (ValueError, IndexError):
+                    raise ValueError(f"Invalid time format in specific_times: {specific_times[0]}. Expected 'HH:MM'.")
 
             elif schedule['type'] == 'interval_based':
-                return now + timedelta(hours=schedule['interval_hours'])
+                # Set interval_hours to 0 if missing
+                interval_hours = schedule.get('interval_hours', 0)
+                if interval_hours <= 0:
+                    return None  # No interval provided, so no next occurrence
+                return now + timedelta(hours=interval_hours)
 
             elif schedule['type'] == 'frequency_based':
+                # Set times_per_day to 0 if missing
+                times_per_day = schedule.get('times_per_day', 0)
+                if times_per_day <= 0:
+                    return None  # No frequency provided, so no next occurrence
                 # Calculate interval based on times_per_day
-                hours_interval = 12 / schedule['times_per_day']  # 12 hour day (8AM-8PM)
+                hours_interval = 12 / times_per_day  # 12 hour day (8AM-8PM)
                 return now + timedelta(hours=hours_interval)
 
         return None  # No more occurrences needed today
@@ -50,7 +75,6 @@ class StateScheduler:
         """Store scheduling state in MongoDB and set next occurrence in Redis."""
         try:
             collection = self.db_manager.get_collection("schedule_states")
-
             state = {
                 "note_id": note_id,
                 "patient_id": patient_id,
@@ -71,6 +95,7 @@ class StateScheduler:
 
             next_occurrence = self._calculate_next_occurrence(schedule, None)
             if next_occurrence:
+                print("TTTTTTTTTTTTTTTTTTTTTTTT")
                 cache_key = self._get_cache_key(note_id, patient_id)
                 cache_data = {
                     "next_occurrence": next_occurrence.isoformat(),

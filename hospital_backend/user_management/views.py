@@ -9,13 +9,15 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from .models import get_object_or_none, PatientDoctorAssignment
+from .models import get_object_or_none, PatientDoctorAssignment, UserRole
 from .serializers import UserSerializer, MyTokenObtainPairSerializer, TokenResponseSerializer, RefreshTokenSerializer, \
     ResendAccountActivationEmailSerializer, UserDetailsSerializer, PatientDoctorAssignmentSerializer, DoctorSerializer
 from .utils.email import send_activation_email
 
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+
+from note_service.permissions import IsAPatient
 
 User = get_user_model()
 
@@ -334,14 +336,11 @@ def user_details(request):
     """,
 )
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAPatient])
 def assign_doctor(request):
-    if request.user.get_role() != "Patient":
-        return Response({"error": "Only patients can assign a doctor."}, status=status.HTTP_403_FORBIDDEN)
-
     serializer = PatientDoctorAssignmentSerializer(data=request.data, context={"request": request})
     if serializer.is_valid():
-        serializer.save(patient=request.user)  # Automatically assign the logged-in patient
+        serializer.save(patient=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -449,7 +448,7 @@ def get_doctors(request):
     """,
 )
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAPatient])
 def get_assigned_doctor(request):
     if request.user.get_role() != "Patient":
         return Response({"error": "Only patients can view their assigned doctor."}, status=status.HTTP_403_FORBIDDEN)

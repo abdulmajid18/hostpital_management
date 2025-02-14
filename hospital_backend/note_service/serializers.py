@@ -21,6 +21,7 @@ class DoctorNoteSerializer(serializers.Serializer):
         """Create a DoctorNote instance. doctor_id is set from request.user."""
         doctor_id = self.context["request"].user.id
         return DoctorNote(
-            doctor_id=doctor_id,
-            **validated_data
+            doctor_id=str(doctor_id),
+            patient_id=str(validated_data["patient_id"]),
+            content=str(validated_data["content"])
         )

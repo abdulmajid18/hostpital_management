@@ -38,6 +38,9 @@ class NoteInput:
     note_id: str
     patient_id: str
 
+    def to_dict(self):
+        return asdict(self)
+
 
 @dataclass
 class ActionableSteps:

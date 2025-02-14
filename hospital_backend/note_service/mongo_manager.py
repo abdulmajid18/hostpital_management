@@ -2,6 +2,8 @@ import logging
 import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Mapping
+
+from django.contrib.auth import get_user_model
 from pymongo import MongoClient, collection
 from pymongo.errors import PyMongoError, ConnectionFailure
 from pymongo.synchronous.collection import Collection
@@ -12,6 +14,9 @@ from dotenv import load_dotenv
 
 from task_processing_service.schedular import StateScheduler
 
+from .encryption import EncryptionUtils
+
+User = get_user_model()
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
@@ -84,8 +89,8 @@ class MongoDBManager:
             raise ValueError("Doctor ID and Patient ID are required")
 
         return {
-            "doctor_id": note.doctor_id,
-            "patient_id": note.patient_id,
+            "doctor_id":str( note.doctor_id),
+            "patient_id": str(note.patient_id),
             "content": note.content,
             "created_at": note.created_at or datetime.utcnow(),
             "updated_at": note.updated_at or datetime.utcnow()
@@ -96,7 +101,11 @@ class MongoDBManager:
         try:
             notes_collection = self.get_collection("notes")
             note_data = self._convert_note_to_dict(note)
-
+            patient_id = note_data.get("patient_id")
+            content = note_data.get("content")
+            patient = User.objects.get(id=patient_id)
+            encrypted_note = EncryptionUtils.encrypt_note(content, patient.public_key)
+            note_data["content"] = encrypted_note
             result = notes_collection.insert_one(note_data)
             logger.info(f"Successfully created note with ID: {result.inserted_id}")
             return str(result.inserted_id)
@@ -191,11 +200,11 @@ class ActionableStepsProcessor:
 
         # Add frequency-specific fields
         if item.frequency == FrequencyType.FIXED_TIME:
-            schedule_data["specific_times"] = item.specific_times
+            schedule_data["specific_times"] = item.specific_times if item.specific_times is not None else []
         elif item.frequency == FrequencyType.INTERVAL_BASED:
-            schedule_data["interval_hours"] = item.interval_hours
+            schedule_data["interval_hours"] = item.interval_hours if item.interval_hours is not None else 0
         elif item.frequency == FrequencyType.FREQUENCY_BASED:
-            schedule_data["times_per_day"] = item.times_per_day
+            schedule_data["times_per_day"] = item.times_per_day if item.times_per_day is not None else 0
 
         step_data = {
             "note_id": note_id,
@@ -206,7 +215,6 @@ class ActionableStepsProcessor:
             "updated_at": current_time,
             "status": "scheduled"
         }
-
         return step_data
 
     def create_actionable_steps(self, steps_input: 'ActionableStepsInput') -> List[str]:
@@ -232,7 +240,6 @@ class ActionableStepsProcessor:
             for plan_item in steps_input.plan:
                 step_data = self._create_plan_step(steps_input.note_id, plan_item, current_time)
                 steps_to_insert.append(step_data)
-
                 # Store schedule state for plan items
                 self.scheduler.store_schedule_state(
                     note_id=steps_input.note_id,

@@ -62,7 +62,8 @@ class User(AbstractUser):
     is_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    public_key = models.TextField(null=True, blank=True)
+    private_key = models.TextField(null=True, blank=True)
     groups = models.ManyToManyField(
         Group, related_name="authentication_user_set", blank=True
     )

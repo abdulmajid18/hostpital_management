@@ -2,6 +2,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model, authenticate
 from django.utils import timezone
 from django.contrib.auth.models import Group
+from rest_framework import serializers
 from rest_framework.fields import EmailField, ChoiceField, ListField, SerializerMethodField
 from rest_framework.serializers import ModelSerializer, CharField, ValidationError, Serializer
 from rest_framework_simplejwt.exceptions import TokenError
@@ -11,6 +12,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import UserRole
 from .utils.custom_exception import CustomException
 from .models import PatientDoctorAssignment
+from note_service.encryption import EncryptionUtils
 
 User = get_user_model()
 
@@ -28,22 +30,24 @@ class UserSerializer(ModelSerializer):
     def validate(self, attrs):
         email = attrs.get("email", "")
         if User.objects.filter(email=email).exists():
-            raise ValidationError({"email": "email is already in use"})
+            raise CustomException("email is already in use")
         return super().validate(attrs)
 
     def validate_role(self, value):
         """Ensure role is either 'Patient' or 'Doctor'"""
         if not Group.objects.filter(name=value).exists():
-            raise ValidationError("Invalid role. Choose either 'Patient' or 'Doctor'.")
+            raise CustomException("Invalid role. Choose either 'Patient' or 'Doctor'.")
         return value
 
     def create(self, validated_data):
         role_name = validated_data.pop("role")
+        private_key, public_key = EncryptionUtils.generate_key_pair()
         user = User.objects.create_user(**validated_data)
-
         group = Group.objects.get(name=role_name)
         user.groups.add(group)
-
+        user.public_key = public_key
+        user.private_key = private_key
+        user.save()
         return user
 
 
@@ -84,6 +88,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         access_token_lifetime = settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"]
         access_expiry = timezone.now() + access_token_lifetime
         return {
+            "private_key": user.private_key,
             "role": group_names,
             "refresh": str(refresh),
             "access": str(refresh.access_token),
@@ -121,6 +126,7 @@ class UserDetailsSerializer(ModelSerializer):
     class Meta:
         model = User
         fields = [
+            "id",
             "name",
             "email",
             "role",
@@ -133,21 +139,26 @@ class UserDetailsSerializer(ModelSerializer):
 
 
 class PatientDoctorAssignmentSerializer(ModelSerializer):
+    doctor_id = serializers.UUIDField(write_only=True)
+
     class Meta:
         model = PatientDoctorAssignment
-        fields = ["patient", "doctor", "created_at"]
-        read_only_fields = ["created_at", "patient"]
+        fields = ["patient", "doctor", "created_at", "doctor_id"]
+        read_only_fields = ["created_at", "patient", "doctor"]
 
     def validate(self, data):
-        patient = self.context["request"].user
+        doctor_id = data.pop("doctor_id", None)
+        try:
+            doctor = User.objects.get(id=doctor_id)
+        except User.DoesNotExist:
+            raise ValidationError("Doctor not found.")
 
-        if patient.get_role() != UserRole.PATIENT:
-            raise ValidationError("Only patients can assign a doctor.")
-        if data["doctor"].get_role() != UserRole.DOCTOR:
+        patient = self.context["request"].user
+        if not doctor.groups.filter(name="Doctor").exists():
             raise ValidationError("Selected user is not a doctor.")
         if PatientDoctorAssignment.objects.filter(patient=patient).exists():
-            raise ValidationError("You are already assigned to a doctor.")
-
+            raise CustomException("You are already assigned to a doctor.")
+        data["doctor"] = doctor
         return data
 
     def create(self, validated_data):

@@ -231,3 +231,12 @@ CACHES = {
         "LOCATION": "redis://127.0.0.1:6379/1",
     }
 }
+
+RABBITMQ = {
+    "HOST": "localhost",
+    "PORT": 5672,
+    "USER": "guest",
+    "PASSWORD": "guest",
+    "QUEUE_NAME": "notes",
+}
+

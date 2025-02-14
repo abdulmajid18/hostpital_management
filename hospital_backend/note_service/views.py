@@ -2,14 +2,17 @@
 import logging
 from datetime import datetime
 
+from django.contrib.auth import get_user_model
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
 from .dataclass import ChecklistItem, Priority, FrequencyType, PlanItem, ActionableStepsInput
+from .encryption import EncryptionUtils
+from .permissions import IsADoctor
 from .rabbitmq_manager import RabbitMQManager
 from .serializers import DoctorNoteSerializer
 from .mongo_manager import MongoDBManager, ActionableStepsProcessor  #
@@ -17,6 +20,7 @@ from task_processing_service.schedular import StateScheduler
 
 from task_processing_service.llm_generator import LLMProcessor, NoteInput
 
+User = get_user_model()
 mongo = MongoDBManager()
 rabbitmq = RabbitMQManager()
 
@@ -44,7 +48,7 @@ rabbitmq = RabbitMQManager()
     }
 )
 @api_view(["POST"])
-@permission_classes([])  # No authentication required for now
+@permission_classes([IsADoctor])  # No authentication required for now
 def create_doctor_note(request):
     """
     Create a new doctor note.
@@ -53,14 +57,13 @@ def create_doctor_note(request):
     - Stores the note in MongoDB.
     - Returns the note ID on success.
     """
-    serializer = DoctorNoteSerializer(data=request.data)
+    serializer = DoctorNoteSerializer(data=request.data, context={"request": request})
     if serializer.is_valid():
         doctor_note = serializer.save()
         try:
             note_id = mongo.create_note(doctor_note)
             message = doctor_note.to_dict()
-            rabbitmq.publish_note_for_training("notes", message)
-            return Response({"note_id": str(note_id)}, status=status.HTTP_201_CREATED)
+            return Response({"note_id": note_id, "note": message.get("content")}, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -76,70 +79,20 @@ llm_processor = LLMProcessor()
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def create_actionable_steps(request):
+def generate_actionable_steps(request, patient_id):
     """
     API endpoint to create actionable steps based on the provided checklist and plan.
     """
     try:
-        current_time = datetime.utcnow()
-        patient_id = "patient123"
-        note_id = "note789"
-        checklist_items = [
-            ChecklistItem(
-                description="Check blood pressure",
-                priority=Priority.HIGH
-            ),
-            ChecklistItem(
-                description="Review medication list",
-                priority=Priority.MEDIUM
-            )
-        ]
-        plan_items = [
-            # Morning and evening medication
-            PlanItem(
-                description="Take blood pressure medication",
-                patient_id=patient_id,
-                start_date=current_time,
-                duration=7,  # 7 days
-                frequency=FrequencyType.FIXED_TIME,
-                specific_times=["09:00", "21:00"]
-            ),
-            # Every 4 hours
-            PlanItem(
-                description="Check temperature",
-                patient_id=patient_id,
-                start_date=current_time,
-                duration=3,  # 3 days
-                frequency=FrequencyType.INTERVAL_BASED,
-                interval_hours=4
-            ),
-            # 3 times per day
-            PlanItem(
-                description="Do breathing exercises",
-                patient_id=patient_id,
-                start_date=current_time,
-                duration=5,  # 5 days
-                frequency=FrequencyType.FREQUENCY_BASED,
-                times_per_day=3
-            )]
-
-        steps_input = ActionableStepsInput(
-            note_id=note_id,
-            checklist=checklist_items,
-            plan=plan_items
-        )
-
-        notes = "The patient presents with a persistent dry cough for the past 7 days, accompanied by intermittent " \
-                "fever (temperature reaching 101°F). " \
-                "This is just to test a code"
-        note = NoteInput(note_content=notes, note_id=note_id, patient_id=patient_id)
-        processed_notes = llm_processor.process_note(note)
-        print("Resulttttttttttttttttt", processed_notes)
-        # step_ids = processor.create_actionable_steps(processed_notes)
-        # logger.info("Creating actionable steps...")
-        # logger.info(f"Created {len(step_ids)} steps")
-        # steps = processor.get_actionable_steps_by_note_id(note_id)
-        return Response({"message": "Actionable steps created successfully", "steps": "steps"},
+        note = mongo.get_note_by_patient(patient_id)
+        if not note:
+            return Response({"message": "No note found for this patient"}, status=status.HTTP_404_NOT_FOUND)
+        patient = User.objects.get(id=patient_id)
+        decrypted_note = EncryptionUtils.decrypt_note(note.get("content"), patient.private_key)
+        note = NoteInput(note_content=decrypted_note, note_id=note.get("note_id"), patient_id=note.get("patient_id"))
+        rabbitmq.publish_note_for_training("notes", note.to_dict())
+        return Response({"message": "Actionable steps Generating! Hit the generated action endpoint to check if ready",
+                         "steps": "steps"},
                         status=status.HTTP_201_CREATED)
     except Exception as e:
         logger.error(f"Error creating actionable steps: {str(e)}")
@@ -148,11 +101,13 @@ def create_actionable_steps(request):
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def get_due_notifications(request):
+def get_due_notifications(request, patient_id):
     """Fetch due notifications."""
     try:
-        patient_id = "patient123"
-        note_id = "note789"
+        note = mongo.get_note_by_patient(patient_id)
+        if not note:
+            return Response({"message": "No note found for this patient"}, status=status.HTTP_404_NOT_FOUND)
+        note_id = note.get("note_id")
         notifications = scheduler.get_due_notifications(note_id=note_id, patient_id=patient_id)
         response_data = [
             {
@@ -170,13 +125,16 @@ def get_due_notifications(request):
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(["POST"])
+@api_view(["PATCH"])
 @permission_classes([AllowAny])
-def check_in_notification(request):
+def check_in_notification(request, patient_id):
     """Mark a notification as completed (Check-in)."""
     try:
-        note_id = "note789"
-        patient_id = "patient123"
+
+        note = mongo.get_note_by_patient(patient_id)
+        if not note:
+            return Response({"message": "No note found for this patient"}, status=status.HTTP_404_NOT_FOUND)
+        note_id = note.get("note_id")
 
         if not note_id or not patient_id:
             return Response({"error": "Both note_id and patient_id are required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -192,27 +150,39 @@ def check_in_notification(request):
 
 
 @api_view(["GET"])
-@permission_classes([AllowAny])
-def get_note_by_patient(request):
+@permission_classes([IsADoctor])
+def get_note_by_patient(request, patient_id: str):
     """Fetch the single note for a specific patient"""
     try:
-        patient_id = "patient123"
         note = mongo.get_note_by_patient(patient_id)
-        if note:
-            return Response({"note": note}, status=status.HTTP_200_OK)
-        else:
+        if not note:
             return Response({"message": "No note found for this patient"}, status=status.HTTP_404_NOT_FOUND)
+        patient = User.objects.get(id=patient_id)
+        decrypted_note = EncryptionUtils.decrypt_note(note.get("content"), patient.private_key)
+        return Response({"note": decrypted_note}, status=status.HTTP_200_OK)
+
+    except User.DoesNotExist:
+        return Response({"error": "Patient not found"}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def get_actionable_steps(request):
-    """API to fetch actionable steps using a note ID."""
+def get_actionable_steps(request, patient_id):
+    """API to fetch actionable steps using a patient_id"""
     try:
-        note_id = "note789"
+        note = mongo.get_note_by_patient(patient_id)
+        if not note:
+            return Response({"message": "No note found for this patient"}, status=status.HTTP_404_NOT_FOUND)
+
+        note_id = note.get("note_id")
         steps = processor.get_actionable_steps_by_note_id(note_id)
+
+        if not steps:
+            return Response({"status": "Generating... check back in 2 or 3 minutes"}, status=status.HTTP_202_ACCEPTED)
+
         return Response({"actionable_steps": steps}, status=status.HTTP_200_OK)
+
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
