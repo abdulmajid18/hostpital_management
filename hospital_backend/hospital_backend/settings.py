@@ -54,7 +54,8 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     "user_management",
-    "note_service"
+    "note_service",
+    "task_processing_service",
 ]
 
 INSTALLED_APPS = DEFAULT_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -223,3 +224,10 @@ AUTHENTICATION_BACKENDS = [
     # Django
     "django.contrib.auth.backends.ModelBackend",
 ]
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+    }
+}
