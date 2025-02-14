@@ -89,7 +89,7 @@ Supports three types of schedules:
 
 ## Documentation
 
-For detailed documentation, including API endpoints, design decisions, and technical constraints, refer to the Full Documentation [here](https://docs.google.com/document/d/1DUdAqUbmtqCIlMk-P8JyzLILUPOdVdHXsJtBSE8H5ys/edit?usp=sharing).
+For detailed documentation, including API endpoints, design decisions, and technical constraints, refer to the Full Documentation  And Architecture Diagram [here](https://docs.google.com/document/d/1DUdAqUbmtqCIlMk-P8JyzLILUPOdVdHXsJtBSE8H5ys/edit?usp=sharing).
 
 ## Conclusion
 
