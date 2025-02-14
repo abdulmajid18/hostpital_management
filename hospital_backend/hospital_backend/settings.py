@@ -54,6 +54,7 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     "user_management",
+    "note_service"
 ]
 
 INSTALLED_APPS = DEFAULT_APPS + THIRD_PARTY_APPS + LOCAL_APPS
