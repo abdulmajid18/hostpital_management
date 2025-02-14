@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  web:
+    container_name: hospital_management_web
+    build:
+      context: ./hospital_management
+      dockerfile: Dockerfile
+      cache_from:
+        - hospital_management_web
+    image: hospital_management_web
+    volumes:
+      - ./hospital_management:/hospital_management_web/
+      - static_volume:/hospital_management_web/staticfiles
+      - media_volume:/hospital_management_web/mediafiles
+    ports:
+      - "8000:8000"  # Exposing web app on port 8000
+      - "5555:5555"  # Exposing Flower on port 5555
+    env_file:
+      - ./.env
+    depends_on:
+      - redis
+      - rabbitmq
+    networks:
+      - hospital_management_network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://web:8000" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  nginx:
+    container_name: hospital_management_nginx
+    build:
+      context: ./nginx
+    image: hospital_management_nginx
+    volumes:
+      - static_volume:/hospital_management_web/staticfiles
+      - media_volume:/hospital_management_web/mediafiles
+    ports:
+      - 80:80
+    depends_on:
+      - web
+    networks:
+      - hospital_management_network
+
+  redis:
+    image: redis:7.4.0-alpine3.20
+    command: redis-server --appendonly yes
+    container_name: hospital_management_redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - hospital_management_network
+
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: hospital_management_rabbitmq
+    ports:
+      - "5672:5672"   # RabbitMQ message broker
+      - "15672:15672" # RabbitMQ Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    networks:
+      - hospital_management_network
+
+volumes:
+  static_volume:
+  media_volume:
+  redis_data:
+
+networks:
+  hospital_management_network:
+    driver: bridge
