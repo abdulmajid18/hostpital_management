@@ -16,6 +16,7 @@ class Task:
         """Initialize Task with RabbitMQ connection and model."""
         self.rabbitmq = RabbitMQManager()
         self.mongo = MongoDBManager()
+        self.openai_api_key = "your-openai-api-key"
 
     def train_on_llm(self, data: str):
         """

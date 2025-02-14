@@ -15,6 +15,8 @@ from .serializers import DoctorNoteSerializer
 from .mongo_manager import MongoDBManager, ActionableStepsProcessor  #
 from task_processing_service.schedular import StateScheduler
 
+from task_processing_service.llm_generator import LLMProcessor, NoteInput
+
 mongo = MongoDBManager()
 rabbitmq = RabbitMQManager()
 
@@ -69,6 +71,7 @@ logger = logging.getLogger(__name__)
 db_manager = MongoDBManager()
 scheduler = StateScheduler(db_manager, logger)
 processor = ActionableStepsProcessor(db_manager, scheduler, logger)
+llm_processor = LLMProcessor()
 
 
 @api_view(["GET"])
@@ -126,11 +129,17 @@ def create_actionable_steps(request):
             plan=plan_items
         )
 
-        step_ids = processor.create_actionable_steps(steps_input)
-        logger.info("Creating actionable steps...")
-        logger.info(f"Created {len(step_ids)} steps")
-
-        return Response({"message": "Actionable steps created successfully", "step_ids": step_ids},
+        notes = "The patient presents with a persistent dry cough for the past 7 days, accompanied by intermittent " \
+                "fever (temperature reaching 101°F). " \
+                "This is just to test a code"
+        note = NoteInput(note_content=notes, note_id=note_id, patient_id=patient_id)
+        processed_notes = llm_processor.process_note(note)
+        print("Resulttttttttttttttttt", processed_notes)
+        # step_ids = processor.create_actionable_steps(processed_notes)
+        # logger.info("Creating actionable steps...")
+        # logger.info(f"Created {len(step_ids)} steps")
+        # steps = processor.get_actionable_steps_by_note_id(note_id)
+        return Response({"message": "Actionable steps created successfully", "steps": "steps"},
                         status=status.HTTP_201_CREATED)
     except Exception as e:
         logger.error(f"Error creating actionable steps: {str(e)}")
